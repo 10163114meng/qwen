@@ -22,7 +22,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val info = TextView(this).apply {
-            text = "使用说明（v3.1 触控优化版）：\n" +
+            text = "使用说明（v3.2 微信兼容增强版）：\n" +
                 "1. 开启「无障碍读屏权限」\n" +
                 "2. 开启「左侧小浮标」\n" +
                 "3. 首次使用：长按左侧「回」浮标弹出千问窗口，登录一次账号后点“隐藏窗口”\n" +

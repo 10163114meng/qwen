@@ -131,7 +131,7 @@ class FloatingQwenService : Service() {
         val density = resources.displayMetrics.density
         val badgeW = (46 * density).toInt()
         val badgeH = (46 * density).toInt()
-        val dragThreshold = (18 * density) // 适配高分屏，避免轻点被误判为拖动
+        val dragThreshold = (18 * density)
 
         badgeBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
