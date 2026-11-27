@@ -15,7 +15,6 @@ import android.os.IBinder
 import android.os.Looper
 import android.view.Gravity
 import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
@@ -31,6 +30,7 @@ class FloatingQwenService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var badgeView: TextView
+    private lateinit var badgeBg: GradientDrawable
     private lateinit var badgeParams: WindowManager.LayoutParams
 
     private lateinit var webContainer: LinearLayout
@@ -69,7 +69,7 @@ class FloatingQwenService : Service() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.WHITE)
             elevation = 16f
-            alpha = 0.01f // 默认几乎完全透明，但在后台保持活跃以便执行 JS
+            alpha = 0.01f
         }
 
         val topBar = LinearLayout(this).apply {
@@ -109,7 +109,7 @@ class FloatingQwenService : Service() {
         webContainer.addView(webView)
 
         webParams = WindowManager.LayoutParams(
-            2, // 后台隐藏时缩成 2px，不挡屏幕
+            2,
             2,
             layoutType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
@@ -129,10 +129,11 @@ class FloatingQwenService : Service() {
     @SuppressLint("ClickableViewAccessibility")
     private fun setupLeftBadge(layoutType: Int) {
         val density = resources.displayMetrics.density
-        val badgeW = (42 * density).toInt()
-        val badgeH = (42 * density).toInt()
+        val badgeW = (46 * density).toInt()
+        val badgeH = (46 * density).toInt()
+        val dragThreshold = (18 * density) // 适配高分屏，避免轻点被误判为拖动
 
-        val bg = GradientDrawable().apply {
+        badgeBg = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadii = floatArrayOf(0f, 0f, 24 * density, 24 * density, 24 * density, 24 * density, 0f, 0f)
             setColor(Color.parseColor("#CC1A73E8"))
@@ -143,7 +144,7 @@ class FloatingQwenService : Service() {
             setTextColor(Color.WHITE)
             textSize = 15f
             gravity = Gravity.CENTER
-            background = bg
+            background = badgeBg
             elevation = 10f
         }
 
@@ -166,10 +167,11 @@ class FloatingQwenService : Service() {
         var touchStartX = 0f
         var downTime = 0L
         var isDragging = false
+        var longPressed = false
 
         val longPressRunnable = Runnable {
             if (!isDragging) {
-                isDragging = true // 阻止抬起时再触发点击
+                longPressed = true
                 if (isWebVisible) hideWebWindow() else showWebWindow()
             }
         }
@@ -182,13 +184,14 @@ class FloatingQwenService : Service() {
                     touchStartX = event.rawX
                     downTime = System.currentTimeMillis()
                     isDragging = false
-                    mainHandler.postDelayed(longPressRunnable, 550)
+                    longPressed = false
+                    mainHandler.postDelayed(longPressRunnable, 600)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dy = event.rawY - touchStartY
                     val dx = event.rawX - touchStartX
-                    if (abs(dy) > 15 || abs(dx) > 15) {
+                    if (abs(dy) > dragThreshold || abs(dx) > dragThreshold) {
                         isDragging = true
                         mainHandler.removeCallbacks(longPressRunnable)
                         badgeParams.y = (startY + dy.toInt()).coerceIn(100, screenHeight - 250)
@@ -199,7 +202,7 @@ class FloatingQwenService : Service() {
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     mainHandler.removeCallbacks(longPressRunnable)
                     val elapsed = System.currentTimeMillis() - downTime
-                    if (!isDragging && elapsed < 500) {
+                    if (!isDragging && !longPressed && elapsed < 600) {
                         onBadgeClicked()
                     }
                     true
@@ -207,6 +210,17 @@ class FloatingQwenService : Service() {
                 else -> false
             }
         }
+    }
+
+    private fun flashBadgeStatus(label: String, colorHex: String, durationMs: Long = 1800) {
+        badgeView.text = label
+        badgeBg.setColor(Color.parseColor(colorHex))
+        mainHandler.postDelayed({
+            if (!isGenerating) {
+                badgeView.text = "回"
+                badgeBg.setColor(Color.parseColor("#CC1A73E8"))
+            }
+        }, durationMs)
     }
 
     private fun showWebWindow() {
@@ -239,18 +253,21 @@ class FloatingQwenService : Service() {
 
         val reader = ScreenReaderService.instance
         if (reader == null) {
-            Toast.makeText(this, "请先开启「无障碍读屏权限」", Toast.LENGTH_LONG).show()
+            flashBadgeStatus("无权", "#CCE53935")
+            Toast.makeText(this, "无障碍服务未连接，请重新开关「千问微信读屏助手」", Toast.LENGTH_LONG).show()
             return
         }
 
         val chatText = reader.readCurrentScreenChat(screenWidth, screenHeight)
         if (chatText.isBlank()) {
-            Toast.makeText(this, "未读到聊天内容，请确认当前在微信聊天页", Toast.LENGTH_SHORT).show()
+            flashBadgeStatus("空", "#CCFB8C00")
+            Toast.makeText(this, "未读到聊天文字，请确认当前在微信聊天页", Toast.LENGTH_SHORT).show()
             return
         }
 
         isGenerating = true
         badgeView.text = "..."
+        badgeBg.setColor(Color.parseColor("#CC43A047"))
 
         val marker = "【请直接输出1条回复】"
         val prompt = "以下是微信聊天记录的最后几句：\n$chatText\n$marker 请直接给出1条最自然、得体、像真人聊天的微信回复内容，不要加引号，不要任何前缀解释。"
@@ -264,11 +281,10 @@ class FloatingQwenService : Service() {
 
                 var textarea = document.querySelector('textarea');
                 if (!textarea) {
-                    AndroidBridge.onError("未找到千问输入框，请长按左侧小浮标检查是否已登录千问");
+                    AndroidBridge.onNeedLogin("未找到千问输入框，已自动打开千问窗口，请先登录");
                     return;
                 }
 
-                // 统计发送前已有的回答块数量
                 function getReplyBlocks() {
                     var selectors = [
                         '[class*="markdown"]',
@@ -285,7 +301,6 @@ class FloatingQwenService : Service() {
 
                 var beforeCount = getReplyBlocks().length;
 
-                // 填入提问并发送
                 var nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
                 nativeSetter.call(textarea, "$escapedPrompt");
                 textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -296,7 +311,6 @@ class FloatingQwenService : Service() {
                     });
                     textarea.dispatchEvent(enterEvent);
 
-                    // 同时尝试点击页面可能的发送按钮作为兜底
                     var sendBtn = document.querySelector('button[type="submit"], [class*="send"], [class*="operateBtn"]');
                     if (sendBtn && !sendBtn.disabled) {
                         try { sendBtn.click(); } catch(e) {}
@@ -311,17 +325,14 @@ class FloatingQwenService : Service() {
                     totalTicks++;
                     var currentReply = "";
 
-                    // 优先从新增的 markdown/回答容器提取
                     var blocks = getReplyBlocks();
                     if (blocks.length > beforeCount) {
                         currentReply = (blocks[blocks.length - 1].innerText || "").trim();
                     } else {
-                        // 兜底：从整页文本中截取 marker 之后的新内容
                         var full = document.body.innerText || "";
                         var idx = full.lastIndexOf("$marker");
                         if (idx !== -1) {
                             var after = full.substring(idx + "$marker".length);
-                            // 去掉提问后半句
                             var cut = after.indexOf("不要任何前缀解释。");
                             if (cut !== -1) {
                                 after = after.substring(cut + "不要任何前缀解释。".length);
@@ -330,14 +341,13 @@ class FloatingQwenService : Service() {
                         }
                     }
 
-                    // 清理常见尾部按钮噪音
                     currentReply = currentReply
                         .replace(/重新生成|复制|赞|踩|分享|深度思考|联网搜索|内容由AI生成.*/g, "")
                         .trim();
 
                     if (currentReply.length > 0 && currentReply === lastText) {
                         stableTicks++;
-                        if (stableTicks >= 2) { // 连续约 2 秒不再变化，视为生成完成
+                        if (stableTicks >= 2) {
                             clearInterval(window._qwenPollTimer);
                             AndroidBridge.onReplyReady(currentReply);
                             return;
@@ -347,12 +357,12 @@ class FloatingQwenService : Service() {
                         stableTicks = 0;
                     }
 
-                    if (totalTicks >= 25) { // 25 秒超时
+                    if (totalTicks >= 25) {
                         clearInterval(window._qwenPollTimer);
                         if (lastText.length > 0) {
                             AndroidBridge.onReplyReady(lastText);
                         } else {
-                            AndroidBridge.onError("生成超时，请长按左侧小浮标检查千问登录状态");
+                            AndroidBridge.onNeedLogin("生成超时，请检查千问是否已登录或弹出验证");
                         }
                     }
                 }, 1000);
@@ -367,28 +377,27 @@ class FloatingQwenService : Service() {
         fun onReplyReady(reply: String) {
             mainHandler.post {
                 isGenerating = false
-                badgeView.text = "回"
-
                 val cleanReply = reply.trim().removeSurrounding("“", "”").removeSurrounding("\"")
-                // 先写入剪贴板作为兜底
                 val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                 clipboard.setPrimaryClip(ClipData.newPlainText("qwen_reply", cleanReply))
 
-                // 尝试直接填入微信输入框
                 val filled = ScreenReaderService.instance?.fillWeChatInputBox(cleanReply) == true
                 if (filled) {
+                    flashBadgeStatus("✓", "#CC43A047", 1200)
                     Toast.makeText(this@FloatingQwenService, "已填入输入框，可修改后发送", Toast.LENGTH_SHORT).show()
                 } else {
+                    flashBadgeStatus("已复制", "#CCFB8C00", 1500)
                     Toast.makeText(this@FloatingQwenService, "未找到输入框，回复已复制到剪贴板", Toast.LENGTH_LONG).show()
                 }
             }
         }
 
         @JavascriptInterface
-        fun onError(msg: String) {
+        fun onNeedLogin(msg: String) {
             mainHandler.post {
                 isGenerating = false
-                badgeView.text = "回"
+                flashBadgeStatus("登录", "#CCE53935", 1500)
+                showWebWindow()
                 Toast.makeText(this@FloatingQwenService, msg, Toast.LENGTH_LONG).show()
             }
         }
