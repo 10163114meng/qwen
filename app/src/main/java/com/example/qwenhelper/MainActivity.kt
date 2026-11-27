@@ -22,19 +22,34 @@ class MainActivity : AppCompatActivity() {
         }
 
         val info = TextView(this).apply {
-            text = "使用说明：\n1. 点击下方按钮开启悬浮窗\n2. 首次使用请在悬浮窗内登录千问账号\n3. 聊天时复制对方的话，点「生成回复」即可"
+            text = "使用说明（v3.0 极简浮标版）：\n" +
+                "1. 开启「无障碍读屏权限」（用于读聊天+自动填输入框）\n" +
+                "2. 开启「左侧小浮标」\n" +
+                "3. 首次使用：长按左侧小浮标，弹出千问窗口登录一次账号，登录完点“隐藏窗口”\n" +
+                "4. 日常聊天：在微信里【单击】左侧小浮标，等待几秒就会自动把回复填进微信输入框，你修改后发送即可！"
             textSize = 15f
-            setPadding(0, 0, 0, 48)
+            setPadding(0, 0, 0, 40)
+        }
+
+        val btnAccessibility = Button(this).apply {
+            text = "1. 开启无障碍读屏权限"
+            textSize = 16f
         }
 
         val btnStart = Button(this).apply {
-            text = "开启微信聊天悬浮窗"
+            text = "2. 开启左侧小浮标"
             textSize = 16f
         }
 
         layout.addView(info)
+        layout.addView(btnAccessibility)
         layout.addView(btnStart)
         setContentView(layout)
+
+        btnAccessibility.setOnClickListener {
+            Toast.makeText(this, "请找到「千问微信读屏助手」并开启", Toast.LENGTH_LONG).show()
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
 
         btnStart.setOnClickListener {
             if (!Settings.canDrawOverlays(this)) {

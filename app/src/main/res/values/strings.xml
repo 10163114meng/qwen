@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">千问微信助手</string>
+    <string name="accessibility_desc">用于读取当前微信聊天内容，并将生成的回复自动填入微信输入框</string>
+</resources>
